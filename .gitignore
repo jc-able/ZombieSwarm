@@ -1,0 +1,21 @@
+# Godot
+.godot/
+*.import
+
+# Large binary assets (share separately)
+*.fbx
+*.glb
+
+# Zombie textures extracted from FBX (too large for git, ~100MB total)
+ZombieFastRun_FBX_*.png
+
+# VAT textures (generated from Blender bake)
+vat_position.exr
+vat_normal.exr
+
+# Local config
+.mcp.json
+
+# OS
+.DS_Store
+Thumbs.db
