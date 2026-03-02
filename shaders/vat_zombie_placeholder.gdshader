@@ -4,14 +4,17 @@ render_mode cull_back;
 // Placeholder animation shader for testing MultiMesh pipeline
 // without real VAT textures. Creates a bobbing/swaying crowd effect.
 // Colors change based on zombie state passed via INSTANCE_CUSTOM.y:
-//   0.0 = running (bright red), 1.0 = climbing (yellow), 2.0 = falling (bright blue)
+//   0 = running (red), 1 = climbing (yellow), 2 = falling (blue),
+//   3 = start_climb (orange), 4 = standing_up (pink)
 //
 // NOTE: INSTANCE_CUSTOM is only available in vertex(), so we pass
 // the state to fragment() via a varying.
 
-uniform vec4 color_running  : source_color = vec4(1.0, 0.1, 0.1, 1.0);
-uniform vec4 color_climbing : source_color = vec4(1.0, 0.9, 0.1, 1.0);
-uniform vec4 color_falling  : source_color = vec4(0.2, 0.4, 1.0, 1.0);
+uniform vec4 color_running     : source_color = vec4(1.0, 0.1, 0.1, 1.0);
+uniform vec4 color_climbing    : source_color = vec4(1.0, 0.9, 0.1, 1.0);
+uniform vec4 color_falling     : source_color = vec4(0.2, 0.4, 1.0, 1.0);
+uniform vec4 color_start_climb : source_color = vec4(1.0, 0.5, 0.0, 1.0);
+uniform vec4 color_standing_up : source_color = vec4(1.0, 0.2, 0.6, 1.0);
 
 varying float v_state;
 
@@ -24,10 +27,12 @@ void vertex() {
 	// Pass state to fragment shader
 	v_state = state;
 
-	// Animation scale: full for running, 30% for climbing, none for falling
+	// Animation scale per state
 	float anim_scale = 1.0;
-	if (state > 0.5 && state < 1.5) anim_scale = 0.3;
-	if (state > 1.5) anim_scale = 0.0;
+	if (state > 0.5 && state < 1.5) anim_scale = 0.3;   // climbing
+	if (state > 1.5 && state < 2.5) anim_scale = 0.0;    // falling
+	if (state > 2.5 && state < 3.5) anim_scale = 0.1;    // start_climb
+	if (state > 3.5) anim_scale = 0.2;                    // standing_up
 
 	// Vertical bob (simulates running bounce)
 	VERTEX.y += sin(t) * 0.12 * anim_scale;
@@ -43,6 +48,8 @@ void vertex() {
 void fragment() {
 	vec3 color = color_running.rgb;
 	if (v_state > 0.5 && v_state < 1.5) color = color_climbing.rgb;
-	if (v_state > 1.5) color = color_falling.rgb;
+	if (v_state > 1.5 && v_state < 2.5) color = color_falling.rgb;
+	if (v_state > 2.5 && v_state < 3.5) color = color_start_climb.rgb;
+	if (v_state > 3.5) color = color_standing_up.rgb;
 	ALBEDO = color;
 }

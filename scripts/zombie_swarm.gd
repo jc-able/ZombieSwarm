@@ -49,7 +49,11 @@ const WALL_MIN_HITS := 2
 const STATE_RUNNING  := 0
 const STATE_CLIMBING := 1
 const STATE_FALLING  := 2
+const STATE_START_CLIMB := 3
+const STATE_STANDING_UP := 4
 const CLIMB_CHECK_RANGE := 5  # cells to check in each perpendicular direction
+const START_CLIMB_DURATION := 0.5  # seconds before climbing begins
+const STANDING_UP_DURATION := 0.6  # seconds to recover from fall
 
 # ── Physics ─────────────────────────────────────────────────────────────────
 const GRAVITY := 20.0
@@ -94,6 +98,7 @@ var _climb_target_y: PackedFloat32Array # wall_top_y to reach while climbing
 var _climb_normal_x: PackedFloat32Array # wall normal X (for climbing orientation)
 var _climb_normal_z: PackedFloat32Array # wall normal Z
 var _time_offset: PackedFloat32Array   # per-instance animation time offset (for shader)
+var _state_timer: PackedFloat32Array   # countdown for transition states
 
 var _base_direction: Vector3
 var _spawn_origin: Vector3
@@ -564,6 +569,8 @@ func spawn_swarm(center: Vector3, direction: Vector3, count: int, spread: float 
 	_climb_normal_z.resize(count)
 	_time_offset = PackedFloat32Array()
 	_time_offset.resize(count)
+	_state_timer = PackedFloat32Array()
+	_state_timer.resize(count)
 
 	# ── Grid placement ───────────────────────────────────────────────────
 	var cols := ceili(sqrt(float(count)))
@@ -627,6 +634,7 @@ func clear_swarm():
 	_climb_normal_x = PackedFloat32Array()
 	_climb_normal_z = PackedFloat32Array()
 	_time_offset = PackedFloat32Array()
+	_state_timer = PackedFloat32Array()
 	# NOTE: Map data (_heightmap, _obstacle_*, _upper_*, _wall_*, _ceiling_y)
 	# is NOT cleared — baked once at load and reused across spawns.
 	if _multimesh_instance and is_instance_valid(_multimesh_instance):
@@ -647,7 +655,7 @@ func _process(delta: float):
 	# Write transforms + state to INSTANCE_CUSTOM
 	for i in range(_instance_count):
 		var xform: Transform3D
-		if _state[i] == STATE_CLIMBING:
+		if _state[i] == STATE_CLIMBING or _state[i] == STATE_START_CLIMB:
 			# Face the wall and tilt 90° to lie flat against it
 			var wall_facing := atan2(-_climb_normal_x[i], -_climb_normal_z[i])
 			xform = Transform3D()
@@ -727,6 +735,26 @@ func _simulate(idx: int, delta: float):
 		on_upper = pos.y > mid_y
 
 	# ══════════════════════════════════════════════════════════════════════
+	# STATE: START_CLIMB (brief pause at wall base before climbing)
+	# ══════════════════════════════════════════════════════════════════════
+	if state == STATE_START_CLIMB:
+		_state_timer[idx] -= delta
+		if _state_timer[idx] <= 0.0:
+			_state[idx] = STATE_CLIMBING
+		_positions[idx] = pos
+		return
+
+	# ══════════════════════════════════════════════════════════════════════
+	# STATE: STANDING_UP (recovery after landing from fall)
+	# ══════════════════════════════════════════════════════════════════════
+	if state == STATE_STANDING_UP:
+		_state_timer[idx] -= delta
+		if _state_timer[idx] <= 0.0:
+			_state[idx] = STATE_RUNNING
+		_positions[idx] = pos
+		return
+
+	# ══════════════════════════════════════════════════════════════════════
 	# STATE: CLIMBING
 	# ══════════════════════════════════════════════════════════════════════
 	if state == STATE_CLIMBING:
@@ -783,11 +811,12 @@ func _simulate(idx: int, delta: float):
 		elif f_obs_top_y > f_layer_floor and pos.y >= f_obs_top_y - 0.5:
 			f_floor_y = f_obs_top_y
 
-		# Landed
+		# Landed → standing up recovery
 		if pos.y <= f_floor_y + 0.2:
 			pos.y = f_floor_y
 			_vel_y[idx] = 0.0
-			_state[idx] = STATE_RUNNING
+			_state[idx] = STATE_STANDING_UP
+			_state_timer[idx] = STANDING_UP_DURATION
 
 		_positions[idx] = pos
 		return
@@ -815,9 +844,10 @@ func _simulate(idx: int, delta: float):
 	if cur_blocked:
 		# Check if we should climb instead of steering around
 		var wall_f := int(_wall_faces[gidx]) if gidx < _wall_faces.size() else 0
-		if wall_f > 0 and _should_climb(gcell.x, gcell.y):
-			# Transition to CLIMBING
-			_state[idx] = STATE_CLIMBING
+		if wall_f > 0 and _wall_top_y[gidx] > pos.y + 1.0 and _should_climb(gcell.x, gcell.y):
+			# Transition to START_CLIMB (brief pause before climbing)
+			_state[idx] = STATE_START_CLIMB
+			_state_timer[idx] = START_CLIMB_DURATION
 			_climb_target_y[idx] = _wall_top_y[gidx]
 			_climb_normal_x[idx] = _wall_normal_x[gidx]
 			_climb_normal_z[idx] = _wall_normal_z[gidx]
@@ -986,6 +1016,8 @@ func _setup_placeholder_mesh() -> ShaderMaterial:
 	mat.set_shader_parameter("color_running", Color(1.0, 0.1, 0.1, 1.0))
 	mat.set_shader_parameter("color_climbing", Color(1.0, 0.9, 0.1, 1.0))
 	mat.set_shader_parameter("color_falling", Color(0.2, 0.4, 1.0, 1.0))
+	mat.set_shader_parameter("color_start_climb", Color(1.0, 0.5, 0.0, 1.0))
+	mat.set_shader_parameter("color_standing_up", Color(1.0, 0.2, 0.6, 1.0))
 	return mat
 
 
